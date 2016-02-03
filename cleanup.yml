@@ -1,0 +1,53 @@
+---
+
+- name: Launch EC2
+  hosts: localhost
+  gather_facts: False
+  vars:
+    keypair: mykeypairname
+    vpc_id: vpc-xxxxxxxx
+    subnet_id: subnet-xxxxxxxx
+    hosted_zone : myhostedzone.com
+    friendly_cidr: 10.10.10.10/32
+    hostname:  ansichefjenkins
+    instance_type: t2.small
+    ami_id: ami-60b6c60a
+    region: us-east-1
+    local_workspace: "/tmp/ansible_berks_scratch"
+  tasks:
+    - name: delete instance
+      ec2:
+         key_name: "{{ keypair }}"
+         group: "{{ hostname }}_group"
+         instance_type: "{{ instance_type }}"
+         image: "{{ ami_id }}"
+         exact_count: 0
+         count_tag: Name
+         instance_tags:
+            Name: ansichef demo
+         wait: true
+         region: "{{ region }}"
+         vpc_subnet_id: "{{ subnet_id }}"
+         assign_public_ip: yes
+      register: ec2
+    - name:  delete rout53 host
+      route53: command=delete zone="{{ hosted_zone }}" record="{{ hostname }}.{{ hosted_zone }}" type=A value="{{ item.public_ip }}"
+      with_items: ec2.instances
+    - name: delete security group
+      ec2_group: 
+        state: absent
+        name: "{{ hostname }}_group"
+        description: ansichef demo
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ region }}"
+        rules:
+          - proto: tcp
+            from_port: 22
+            to_port: 22
+            cidr_ip: "{{ friendly_cidr }}"
+          - proto: tcp
+            from_port: 8080
+            to_port: 8080
+            cidr_ip: "{{ friendly_cidr }}"
+      register: ec2group
+    - file: path={{local_workspace}}/chef_repo state=absent mode=0755
